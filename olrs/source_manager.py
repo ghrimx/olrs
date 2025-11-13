@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLi
                              QProgressDialog, QComboBox)
 from PyQt6.QtSql import QSqlTableModel
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal as Signal
 import fitz
 
 
@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class AddSourceDialog(QDialog):
+    sig_source_added = Signal(object)
+
     def __init__(self, db: DbManager, parent=None):
         super().__init__(parent)
         self.db = db
@@ -138,13 +140,18 @@ class AddSourceDialog(QDialog):
                 language=language
             )
             QMessageBox.information(self, "Added", f"Source added (ID {self.new_id})")
-            super().accept()
         except Exception as e:
             QMessageBox.critical(self, "Database error", str(e))
             return
+        else:
+            self.sig_source_added.emit({"files": [self.pdf_path], "lang": language})
+            super().accept()
+
         
 
 class SourceManager(QWidget):
+    sig_source_added = Signal(object)
+
     def __init__(self, db: DbManager):
         super().__init__()
         self.db = db
@@ -188,8 +195,10 @@ class SourceManager(QWidget):
         self.save_btn.clicked.connect(self.save_changes)
         self.delete_btn.clicked.connect(self.delete_selected)
 
+
     def add_source(self):
         dlg = AddSourceDialog(self.db, self)
+        dlg.sig_source_added.connect(self.sig_source_added)
         if dlg.exec():
             self.model.select()  # Refresh view after insertion
             self.table.resizeColumnsToContents()
