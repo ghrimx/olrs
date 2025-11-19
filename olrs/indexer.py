@@ -3,7 +3,7 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from whoosh.index import create_in, open_dir, FileIndex
+from whoosh.index import create_in, open_dir, FileIndex, exists_in
 from whoosh.fields import Schema, TEXT, ID, NUMERIC
 from whoosh.qparser import MultifieldParser
 
@@ -93,7 +93,7 @@ class WhooshBackend(BaseIndexer):
                 section=TEXT(stored=True),
                 content=TEXT(stored=False)
             )
-            if not (lang_dir / "MAIN").exists():
+            if not exists_in(lang_dir, indexname="MAIN"):
                 self.indexes[lang] = create_in(lang_dir, schema, indexname="MAIN")
             else:
                 self.indexes[lang] = open_dir(lang_dir, indexname="MAIN")
