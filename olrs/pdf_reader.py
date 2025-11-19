@@ -3,7 +3,7 @@ import pymupdf.layout
 pymupdf.layout.activate()
 from pymupdf4llm import to_markdown
 from PyQt6.QtCore import QThread, pyqtSignal as Signal
-from searcher import SearchManager
+from indexer import BackendManager
 
 
 
@@ -25,15 +25,18 @@ class PDFIndexWorker(QThread):
     finished = Signal(str)  # pdf_path
     error = Signal(str)
 
-    def __init__(self, manager: SearchManager, pdf_paths: list[str], lang: str):
+    def __init__(self, manager: BackendManager, pdfs: list[dict]):
         super().__init__()
         self.manager = manager
-        self.pdf_paths = pdf_paths
-        self.lang = lang
+        self.pdfs = pdfs
 
     def run(self):
-        pdf_path: Path
-        for pdf_path in self.pdf_paths:
+        pdf_path: str
+        for pdf in self.pdfs:
+            print(pdf)
+            lang = pdf.get('lang')
+            pdf_path = pdf.get('path')
+            doc_id = pdf.get('doc_id')
             try:
                 doc = pymupdf.open(pdf_path)
                 total_pages = doc.page_count
@@ -41,14 +44,16 @@ class PDFIndexWorker(QThread):
                     # Optional: detect section heading here or pass None
                     section = None
                     self.manager.add_page(
+                        doc_id=doc_id,
                         pdf_path=pdf_path,
                         text=text,
-                        lang=self.lang,
+                        lang=lang,
                         page=page_number,
                         section=section
                     )
-                    self.progress.emit(pdf_path.as_posix(), page_number, total_pages)
+                    self.progress.emit(pdf_path, page_number, total_pages)
             except Exception as e:
+                print(f"Error while indexing {pdf_path}: {e}")
                 self.error.emit(f"Error while indexing {pdf_path}: {e}")
             finally:
-                self.finished.emit(pdf_path.as_posix())
+                self.finished.emit(pdf_path)

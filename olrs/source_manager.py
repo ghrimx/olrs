@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal as Signal
 import fitz
 
 
-from config import DATA_DIR, Language
+from config import DATA_DIR, EULanguage
 from db_manager import DbManager
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,8 @@ class AddSourceDialog(QDialog):
         form.addRow("Reference:", self.ref_edit)
 
         self.language_combo = QComboBox()
-        for l in Language:
-            self.language_combo.addItem(l.name)
+        for l in EULanguage:
+            self.language_combo.addItem(l.value)
 
         form.addRow("Language:", self.language_combo)
 
@@ -113,17 +113,18 @@ class AddSourceDialog(QDialog):
 
         # Source path
         source = self.pdf_path
+        destination = DATA_DIR
 
         try:
-            shutil.copy2(source, DATA_DIR)
+            shutil.copy2(source, destination)
         except shutil.SameFileError:
             logger.error("Source and destination represents the same file.")
             return
         except PermissionError:
             logger.error("Permission denied.")
             return
-        except:
-            logger.error("Error occurred while copying file.")
+        except Exception as e:
+            logger.error(f"Error occurred while copying file. err={e}")
             return
         else:
             logger.info("File copied successfully.")
@@ -144,13 +145,14 @@ class AddSourceDialog(QDialog):
             QMessageBox.critical(self, "Database error", str(e))
             return
         else:
-            self.sig_source_added.emit({"files": [self.pdf_path], "lang": language})
+            self.sig_source_added.emit({"doc_id": self.new_id, "path": self.pdf_path.as_posix(), "lang": language})
             super().accept()
 
         
 
 class SourceManager(QWidget):
     sig_source_added = Signal(object)
+    sig_source_removed = Signal(object)
 
     def __init__(self, db: DbManager):
         super().__init__()
@@ -194,7 +196,7 @@ class SourceManager(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
         self.save_btn.clicked.connect(self.save_changes)
         self.delete_btn.clicked.connect(self.delete_selected)
-
+        # self.reindex_button.clicked.connect(self.reindex_selected)
 
     def add_source(self):
         dlg = AddSourceDialog(self.db, self)
@@ -230,6 +232,12 @@ class SourceManager(QWidget):
             source_id = self.model.data(self.model.index(index.row(), 0))
             q = self.db.db.exec(f"DELETE FROM vectors WHERE source_id = {source_id}")
             self.model.removeRow(index.row())
+
+            filename = self.model.data(self.model.index(index.row(), 1))
+            filepath = DATA_DIR.joinpath(filename)
+            import os
+            os.remove(filepath)
+            self.sig_source_removed.emit(filepath)
 
         if not self.model.submitAll():
             QMessageBox.critical(self, "Error", self.model.lastError().text())

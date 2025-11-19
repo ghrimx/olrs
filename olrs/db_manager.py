@@ -85,6 +85,15 @@ class DbManager:
         if q.next():
             return q.value(0)
         return None
+    
+    def get_source_metadata(self, filename):
+        q = QSqlQuery(self.db)
+        q.prepare("SELECT id, title, short_title, url, reference FROM sources WHERE filename = ?")
+        q.addBindValue(filename)
+        q.exec()
+        if q.next():
+            return {'id':q.value(0), 'title': q.value(1), 'short_title': q.value(2), 'url': q.value(3), 'reference': q.value(4)}
+        return None
 
     def insert_source(self, filename, title, short_title, url, reference, page_count, language):
         q = QSqlQuery(self.db)
@@ -122,6 +131,30 @@ class DbManager:
 
 
     def all_sources(self):
+        metadata = {}
         q = QSqlQuery(self.db)
-        q.exec("SELECT id, filename, title, short_title, reference, page_count, language FROM sources")
-        return q
+        q.exec(
+            """
+                SELECT
+                    id,
+                    filename,
+                    title,
+                    short_title,
+                    url,
+                    reference,
+                    page_count,
+                    language
+                FROM sources
+            """
+        )
+        while q.next():
+            metadata[str(q.value(0))] = {'id':q.value(0),
+                                    'filename': q.value(1),
+                                    'title': q.value(2),
+                                    'short_title': q.value(3),
+                                    'url': q.value(4),
+                                    'reference': q.value(5),
+                                    'page_count': q.value(6),
+                                    'language': q.value(7)}
+        return metadata
+

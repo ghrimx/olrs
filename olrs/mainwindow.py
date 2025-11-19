@@ -1,3 +1,4 @@
+import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QComboBox, QPushButton, QLineEdit, QRadioButton, QButtonGroup, QTableView
@@ -9,57 +10,14 @@ from pyqtspinner import WaitingSpinner
 
 from db_manager import DbManager
 from source_manager import SourceManager
-from config import Language
+from config import SYNONYM_FILE
 
-from indexer import WhooshBackend
+from indexer import WhooshBackend, BackendManager
 from pdf_reader import PDFIndexWorker
-from searcher import SearchManager
+from synonym import SynonymManager
+from searcher import SearchWidget
 
-
-class SearchWidget(QWidget):
-    sig_query = Signal()
-
-    def __init__(self,):
-        super().__init__()
-        self.setWindowTitle("Search Widget")
-        self.resize(1000, 600)
-
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        # --- Controls ---
-        hbox = QHBoxLayout()
-        self.input = QLineEdit()
-        self.input.setPlaceholderText("Enter search query...")
-        self.language_combo = QComboBox()
-        for l in Language:
-            self.language_combo.addItem(l.name)
-        self.search_btn = QPushButton("Search")
-
-        # --- Search options ---
-        self.partial_radio = QRadioButton("Partial")
-        self.whole_radio = QRadioButton("Whole-word")
-        self.search_option = QButtonGroup()
-        self.search_option.addButton(self.partial_radio)
-        self.search_option.addButton(self.whole_radio)
-        self.partial_radio.setChecked(True)
-
-        hbox.addWidget(self.input)
-        hbox.addWidget(self.search_btn)
-        hbox.addWidget(self.language_combo)
-        hbox.addWidget(self.partial_radio)
-        hbox.addWidget(self.whole_radio)
-        layout.addLayout(hbox)
-
-        # --- Results view ---
-        self.model = QSqlQueryModel()
-        self.table = QTableView()
-        self.table.setModel(self.model)
-        layout.addWidget(self.table)
-
-        # --- Signals ---
-        self.search_btn.clicked.connect(self.sig_query)
-        # self.table.doubleClicked.connect(self.open_pdf)
+from pymupdf_qt_viewer.pymupdfviewer import PdfViewer
 
 
 class MainWindow(QMainWindow):
@@ -71,21 +29,24 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         self.backend = WhooshBackend()
-        self.manager = SearchManager(self.backend)
+        self.manager = BackendManager(self.backend)
 
         # --- tabs ---
-        self.search_tab = SearchWidget()
+        self.search_tab = SearchWidget(self.db, self.manager)
         self.source_tab = SourceManager(self.db)
+        self.synonym_tab = SynonymManager(SYNONYM_FILE)
 
         self.tabs.addTab(self.search_tab, "Search")
         self.tabs.addTab(self.source_tab , "Library")
+        self.tabs.addTab(self.synonym_tab , "Synonym")
 
         self.statusBar().showMessage("Ready.", 7000)
         self.waitinspinner = WaitingSpinner(self, True, True)
         
         # --- Signals ---
-        self.source_tab.sig_source_added.connect(self.add_pdfs)
-        self.search_tab.sig_query.connect(self.do_search)
+        self.source_tab.sig_source_added.connect(self.add_pdf)
+        self.source_tab.sig_source_removed.connect(self.remove_pdf)
+        self.search_tab.sig_open_pdf.connect(self.open_pdf)
 
     def startSpinner(self, m: str = ""):
         self.statusBar().showMessage(m, 7000)
@@ -96,21 +57,16 @@ class MainWindow(QMainWindow):
         self.waitinspinner.stop()
         self.statusBar().showMessage(m, 7000)
 
-    def add_pdfs(self, source: dict):
-        files = source.get("files")
-        lang = source.get("lang")
+    def add_pdf(self, source: dict):
         self.startSpinner()
-        self.worker = PDFIndexWorker(self.manager, files, lang)
+        self.worker = PDFIndexWorker(self.manager, [source])
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
         # self.worker.finished.connect(self.on_error)
         self.worker.start()
 
-    def do_search(self):
-        query = self.search_tab.input.text()
-        lang = self.search_tab.language_combo.currentText()
-        results = self.manager.search(query, lang)
-        print(results)
+    def remove_pdf(self, filepath):
+        self.backend.delete_index(filepath)
 
     def on_progress(self, pdf_path, current_page, total_pages):
         # self.progress_bar.setMaximum(total_pages)
@@ -120,3 +76,22 @@ class MainWindow(QMainWindow):
     def on_finished(self, pdf_path):
         self.stopSpinner(f"Finished indexing {pdf_path}")
         # self.progress_bar.setValue(0)
+
+    def open_pdf(self, pdf_path: str, pno: int, query: str):
+        pdf_viewer = PdfViewer()
+        pdf_viewer.loadDocument(pdf_path)
+
+        # Apply highlights if query provided
+        if query:
+            terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2]
+
+            for term in terms:
+                for page in pdf_viewer.fitzdoc:
+                    quads = page.search_for(term, quads=True)
+                    for q in quads:
+                        highlight = page.add_highlight_annot(q)
+                        highlight.set_colors(stroke=(1, 1, 0))  # yellow
+                        highlight.update()
+
+        pdf_viewer.page_navigator.jump(pno)
+        pdf_viewer.showMaximized()
