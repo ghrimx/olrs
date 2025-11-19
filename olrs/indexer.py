@@ -1,12 +1,13 @@
 # index_worker.py
-from PyQt6.QtCore import QThread, pyqtSignal
 from pathlib import Path
+from abc import ABC, abstractmethod
+from PyQt6.QtCore import QThread, pyqtSignal
 
 from whoosh.index import create_in, open_dir, FileIndex
 from whoosh.fields import Schema, TEXT, ID, NUMERIC
 from whoosh.qparser import MultifieldParser
 
-from base import SearchBackend
+from tantivy import SchemaBuilder, Index, doc
 
 from db_manager import DbManager
 from config import INDEX_DIR
@@ -22,6 +23,25 @@ from config import INDEX_DIR
 # | `content` | indexed           | Extracted text of that page or section          |
 
 
+class BaseIndexer(ABC):
+    """Abstract base class for a search backend."""
+
+    @abstractmethod
+    def index_document(self, doc_id: str, text: str, metadata: dict):
+        pass
+
+    @abstractmethod
+    def search(self, query: str, lang: str | None = None, limit: int = 20):
+        """Return a list of result dicts with at least: path, title, snippet, score."""
+        pass
+
+    @abstractmethod
+    def commit(self):
+        pass
+
+    @abstractmethod
+    def clear_index(self):
+        pass
 
 
 class IndexWorker(QThread):
@@ -53,7 +73,7 @@ class IndexWorker(QThread):
             self.error.emit(str(e))
 
 
-class WhooshBackend(SearchBackend):
+class WhooshBackend(BaseIndexer):
     """Whoosh backend supporting multiple language indexes."""
     def __init__(self):
         self.index_root = INDEX_DIR
@@ -119,3 +139,59 @@ class WhooshBackend(SearchBackend):
             for subdir in self.index_root.glob("*"):
                 for f in subdir.glob("*"):
                     f.unlink()
+
+
+class TantivyBackend(BaseIndexer):
+    """Tantivy backend with per-language sub-indexes and page/section support."""
+    def __init__(self, index_root="indexdir_tantivy"):
+        self.index_root = Path(index_root)
+        self.index_root.mkdir(exist_ok=True)
+        self.indexes = {}
+
+    def _get_or_create_index(self, lang: str):
+        lang_dir = self.index_root / lang
+        lang_dir.mkdir(exist_ok=True)
+        if lang not in self.indexes:
+            builder = SchemaBuilder()
+            builder.add_text_field("title", stored=True)
+            builder.add_text_field("content", stored=False)
+            builder.add_text_field("lang", stored=True)
+            builder.add_text_field("path", stored=True)
+            builder.add_text_field("doc_id", stored=True)
+            builder.add_text_field("page", stored=True)
+            builder.add_text_field("section", stored=True)
+            schema = builder.build()
+            if (lang_dir / "meta.json").exists():
+                ix = Index(schema, lang_dir)
+            else:
+                ix = Index.create(schema, lang_dir)
+            self.indexes[lang] = ix
+        return self.indexes[lang]
+
+    def index_document(self, doc_id, text, metadata, lang):
+        ix = self._get_or_create_index(lang)
+        writer = ix.writer()
+        writer.add_document(doc(
+            doc_id=doc_id,
+            path=metadata.get("path"),
+            title=metadata.get("title", ""),
+            lang=lang,
+            page=str(metadata.get("page", "")),
+            section=metadata.get("section", ""),
+            content=text
+        ))
+        writer.commit()
+
+    def search(self, query, lang=None, limit=20):
+        langs = [lang] if lang else [d.name for d in self.index_root.iterdir() if d.is_dir()]
+        all_results = []
+        for lg in langs:
+            ix = self._get_or_create_index(lg)
+            searcher = ix.searcher()
+            parser = ix.parse_query(query, ["content", "title", "section"])
+            results = searcher.search(parser, limit)
+            for r in results:
+                stored = searcher.doc(r.doc_id)
+                stored["lang"] = lg
+                all_results.append(stored)
+        return all_results
