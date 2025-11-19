@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (
-    QMainWindow, QTabWidget, QWidget, QVBoxLayout,
-    QHBoxLayout, QComboBox, QPushButton, QLineEdit,
-    QRadioButton, QButtonGroup, QTableView, QLabel
+    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
+    QComboBox, QPushButton, QLineEdit, QRadioButton, QButtonGroup, QTableView
     )
 from PyQt6.QtSql import QSqlQueryModel
 from PyQt6.QtCore import pyqtSignal as Signal
+
+from pyqtspinner import WaitingSpinner
 
 from db_manager import DbManager
 from source_manager import SourceManager
@@ -13,6 +14,7 @@ from config import Language
 from indexer import WhooshBackend
 from pdf_reader import PDFIndexWorker
 from searcher import SearchManager
+
 
 class SearchWidget(QWidget):
     sig_query = Signal()
@@ -79,17 +81,29 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.source_tab , "Library")
 
         self.statusBar().showMessage("Ready.", 7000)
-
+        self.waitinspinner = WaitingSpinner(self, True, True)
+        
         # --- Signals ---
         self.source_tab.sig_source_added.connect(self.add_pdfs)
         self.search_tab.sig_query.connect(self.do_search)
 
+    def startSpinner(self, m: str = ""):
+        self.statusBar().showMessage(m, 7000)
+        self.waitinspinner.start()
+        QApplication.processEvents()
+    
+    def stopSpinner(self, m: str = ""):
+        self.waitinspinner.stop()
+        self.statusBar().showMessage(m, 7000)
+
     def add_pdfs(self, source: dict):
         files = source.get("files")
         lang = source.get("lang")
+        self.startSpinner()
         self.worker = PDFIndexWorker(self.manager, files, lang)
         self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
+        # self.worker.finished.connect(self.on_error)
         self.worker.start()
 
     def do_search(self):
@@ -101,8 +115,8 @@ class MainWindow(QMainWindow):
     def on_progress(self, pdf_path, current_page, total_pages):
         # self.progress_bar.setMaximum(total_pages)
         # self.progress_bar.setValue(current_page)
-        print(f"Indexing {pdf_path}: page {current_page}/{total_pages}")
+        self.statusBar().showMessage(f"Indexing {pdf_path}: page {current_page}/{total_pages}", 7000)
 
     def on_finished(self, pdf_path):
-        print(f"Finished indexing {pdf_path}")
+        self.stopSpinner(f"Finished indexing {pdf_path}")
         # self.progress_bar.setValue(0)

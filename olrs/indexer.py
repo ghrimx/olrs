@@ -1,13 +1,12 @@
 # index_worker.py
 from pathlib import Path
 from abc import ABC, abstractmethod
-from PyQt6.QtCore import QThread, pyqtSignal
 
 from whoosh.index import create_in, open_dir, FileIndex
 from whoosh.fields import Schema, TEXT, ID, NUMERIC
 from whoosh.qparser import MultifieldParser
 
-from tantivy import SchemaBuilder, Index, doc
+from tantivy import SchemaBuilder, Index
 
 from db_manager import DbManager
 from config import INDEX_DIR
@@ -42,35 +41,6 @@ class BaseIndexer(ABC):
     @abstractmethod
     def clear_index(self):
         pass
-
-
-class IndexWorker(QThread):
-    progress = pyqtSignal(object, int, int)      
-    finished = pyqtSignal(int)
-    error = pyqtSignal(str)
-
-    def __init__(self, source_id: int, pdf_path: Path, language: str, parent=None):
-        super().__init__(parent)
-        self.source_id = source_id
-        self.pdf_path = pdf_path
-        self.language = language
-
-    def run(self):
-        try:
-            db = DbManager.instance()
-
-            records = extract_pdf_text(self.pdf_path, self.language)
-            total = len(records)
-            
-            embeddings = model.encode([t for _, t, _ in records])
-
-            for i, ((page, text, lemma), emb) in enumerate(zip(records, embeddings)):
-                db.insert_vector(self.source_id, page, text, lemma, np_to_blob(emb), self.language)
-                self.progress.emit(self.pdf_path, i + 1, total)
-
-            self.finished.emit(total)
-        except Exception as e:
-            self.error.emit(str(e))
 
 
 class WhooshBackend(BaseIndexer):

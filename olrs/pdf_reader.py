@@ -2,7 +2,7 @@ from pathlib import Path
 import pymupdf.layout
 pymupdf.layout.activate()
 from pymupdf4llm import to_markdown
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal as Signal
 from searcher import SearchManager
 
 
@@ -21,8 +21,9 @@ class PDFIndexWorker(QThread):
     QThread worker to index PDFs page by page in the background.
     Emits signals to update GUI progress.
     """
-    progress = pyqtSignal(str, int, int)  # pdf_path, current_page, total_pages
-    finished = pyqtSignal(str)  # pdf_path
+    progress = Signal(str, int, int)  # pdf_path, current_page, total_pages
+    finished = Signal(str)  # pdf_path
+    error = Signal(str)
 
     def __init__(self, manager: SearchManager, pdf_paths: list[str], lang: str):
         super().__init__()
@@ -48,7 +49,6 @@ class PDFIndexWorker(QThread):
                     )
                     self.progress.emit(pdf_path.as_posix(), page_number, total_pages)
             except Exception as e:
-                print(f"Error indexing {pdf_path}: {e}")
-                
+                self.error.emit(f"Error while indexing {pdf_path}: {e}")
             finally:
                 self.finished.emit(pdf_path.as_posix())
