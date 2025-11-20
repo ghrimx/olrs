@@ -6,7 +6,7 @@ from whoosh.index import create_in, open_dir, FileIndex, exists_in
 from whoosh.fields import Schema, TEXT, ID, NUMERIC
 from whoosh.qparser import MultifieldParser, OrGroup
 from whoosh.query import Term, FuzzyTerm, Or, Phrase
-from whoosh.analysis import StemmingAnalyzer, NgramWordAnalyzer
+from whoosh.analysis import StemmingAnalyzer, StandardAnalyzer, NgramWordAnalyzer
 
 
 from tantivy import SchemaBuilder, Index
@@ -51,7 +51,6 @@ class BaseIndexer(ABC):
         pass
 
 
-
 class WhooshBackend:
     """Whoosh backend supporting multiple language indexes and flexible search modes."""
 
@@ -60,16 +59,14 @@ class WhooshBackend:
         self.index_root.mkdir(exist_ok=True)
         self.indexes = {}
 
-    # ----------------------------
+    # ---------------------------------------------------
     # Create or get index per language
-    # ----------------------------
-    def _get_or_create_index(self, lang: str, partial=False):
+    # ---------------------------------------------------
+    def _get_or_create_index(self, lang: str):
         lang_dir = self.index_root / lang
         lang_dir.mkdir(exist_ok=True)
 
         if lang not in self.indexes:
-            # Analyzer selection
-            analyzer = NgramWordAnalyzer(minsize=3, maxsize=20) if partial else StemmingAnalyzer()
             schema = Schema(
                 doc_id=ID(stored=True, unique=True),
                 path=ID(stored=True),
@@ -77,82 +74,131 @@ class WhooshBackend:
                 lang=ID(stored=True),
                 page=NUMERIC(stored=True),
                 section=TEXT(stored=True),
-                content=TEXT(stored=False, analyzer=analyzer)
+
+                # For partial search (substring)
+                content_partial=TEXT(stored=False,
+                                     analyzer=NgramWordAnalyzer(minsize=3, maxsize=20)),
+
+                # For whole word, phrase, synonyms, fuzzy
+                content_exact=TEXT(stored=False,
+                                   analyzer=StandardAnalyzer()),
+
+                # Titles/sections are also indexed normally
+                title_exact=TEXT(stored=False, analyzer=StandardAnalyzer()),
+                section_exact=TEXT(stored=False, analyzer=StandardAnalyzer()),
             )
+
             if not exists_in(lang_dir):
-                self.indexes[lang] = create_in(lang_dir, schema,)
+                self.indexes[lang] = create_in(lang_dir, schema)
             else:
                 self.indexes[lang] = open_dir(lang_dir)
+
         return self.indexes[lang]
 
-    # ----------------------------
-    # Index a single document/page
-    # ----------------------------
-    def index_document(self, doc_id, text: str, metadata: dict, lang: str, partial=False):
-        ix: FileIndex = self._get_or_create_index(lang, partial=partial)
+    # ---------------------------------------------------
+    # Index a single document or page
+    # ---------------------------------------------------
+    def index_document(self, doc_id, text: str, metadata: dict, lang: str):
+        ix: FileIndex = self._get_or_create_index(lang)
         writer = ix.writer()
+
         writer.update_document(
             doc_id=str(doc_id),
             path=str(metadata.get("path")),
-            title=str(metadata.get("title", "")),
+            title=str(metadata.get("title")),
             lang=str(lang),
             page=metadata.get("page", 1),
             section=str(metadata.get("section", "")),
-            content=str(text)
+
+            content_partial=text,
+            content_exact=text,
+
+            title_exact=str(metadata.get("title", "")),
+            section_exact=str(metadata.get("section", "")),
         )
         writer.commit()
 
-    # ----------------------------
-    # Search method supporting modes
-    # ----------------------------
-    def search(self, query: str, lang=None, mode=SearchMode.PARTIAL, limit=50):
-        """
-        mode: "fuzzy", "partial", "whole"
-        """
+    @staticmethod
+    def _get_matched_terms(matched_terms: set):
+        terms = set()
+        for l in matched_terms:
+            byte_string = l[1]
+            decoded_string = str(byte_string.decode("utf-8"))
+            terms.add(decoded_string)
+        return terms
+
+    # ---------------------------------------------------
+    # Search method supporting fuzzy / partial / whole
+    # ---------------------------------------------------
+    def _search(self, query: str, lang=None, mode=SearchMode.PARTIAL, limit=50):
         langs = [lang] if lang else [d.name for d in self.index_root.iterdir() if d.is_dir()]
         all_results = []
-        for lg in langs:
-            # Choose analyzer based on mode
-            partial = mode == SearchMode.PARTIAL
-            ix: FileIndex = self._get_or_create_index(lg, partial=partial)
 
-            # Parse query
-            qp = MultifieldParser(["content", "title", "section"], schema=ix.schema, group=OrGroup)
+        for lg in langs:
+            ix: FileIndex = self._get_or_create_index(lg)
             tokens = query.split()
             query_list = []
 
+            # Fields depend on mode
+            if mode == SearchMode.PARTIAL:
+                fields = ["content_partial"]
+            else:
+                fields = ["content_exact", "title_exact", "section_exact"]
+
             for token in tokens:
                 token = token.lower()
-                if mode == SearchMode.FUZZY:
-                    for field in ["content", "title", "section"]:
-                        query_list.append(FuzzyTerm(field, token, maxdist=1))
-                elif mode == SearchMode.WHOLE:
-                    # Use Phrase query on each field
-                    for field in ["content", "title", "section"]:
-                        if len(tokens) > 1:
-                            query_list.append(Phrase(field, tokens))
-                            break
-                        else:
-                            query_list.append(Term(field, token))
-                elif mode == SearchMode.PARTIAL:
-                    # Ngram content already indexed, use normal parser
+
+                # ---------- Partial substring search ----------
+                if mode == SearchMode.PARTIAL:
+                    qp = MultifieldParser(["content_partial"], schema=ix.schema)
                     query_list.append(qp.parse(token))
-                else:
-                    raise ValueError(f"Unknown search mode: {mode}")
+
+                # ---------- Fuzzy search ----------
+                elif mode == SearchMode.FUZZY:
+                    for field in fields:
+                        query_list.append(FuzzyTerm(field, token, maxdist=1))
+
+                # ---------- Exact whole-word / phrase ----------
+                elif mode == SearchMode.WHOLE:
+                    if len(tokens) > 1:
+                        # phrase search
+                        for field in fields:
+                            query_list.append(Phrase(field, tokens))
+                    else:
+                        # whole single word
+                        for field in fields:
+                            query_list.append(Term(field, token))
 
             final_query = Or(query_list)
+            print(f"final_query:{final_query}")
 
-            # Execute search
             with ix.searcher() as s:
-                res = s.search(final_query, limit=limit)
+                res = s.search(final_query, limit=limit, terms=True)
                 for r in res:
                     data = dict(r)
                     data["score"] = r.score
                     data["lang"] = lg
-                    all_results.append(data)
+                    all_results.append(data)            
 
-        # Sort descending by score
-        return sorted(all_results, key=lambda x: -x["score"])
+        terms = self._get_matched_terms(res.matched_terms())
+
+        print(f"\nterms:{terms}")
+        # Sort by score descending
+        return sorted(all_results, key=lambda x: -x["score"]), terms
+    
+    def search(self, query: str, lang=None, mode=SearchMode.PARTIAL, limit=50):
+
+        res, terms = self._search(query, lang=lang, mode=mode, limit=limit)
+
+        if res:
+            return res, terms
+        
+        else:
+            if mode == SearchMode.PARTIAL:
+                res, terms = self._search(query, lang=lang, mode=SearchMode.FUZZY, limit=limit)
+        
+        return res, terms
+
     
     def commit(self, lang=None):
         pass  # handled per-write in Whoosh
@@ -179,7 +225,6 @@ class WhooshBackend:
         writer.commit()
 
     def delete_index(self, fpath: str):
-        print(f'delete_index: {fpath}')
         fpath = str(fpath)
         for lang_dir in self.index_root.iterdir():
             if lang_dir.is_dir():
@@ -187,76 +232,6 @@ class WhooshBackend:
                 writer = ix.writer()
                 writer.delete_by_term("path", fpath)
                 writer.commit()
-
-
-
-class WhooshBackendbkp(BaseIndexer):
-    """Whoosh backend supporting multiple language indexes."""
-    def __init__(self):
-        self.index_root = INDEX_DIR
-        self.index_root.mkdir(exist_ok=True)
-        self.indexes = {}
-
-    def _get_or_create_index(self, lang: str):
-        lang_dir = self.index_root / lang
-        lang_dir.mkdir(exist_ok=True)
-        if lang not in self.indexes:
-            schema = Schema(
-                doc_id=ID(stored=True, unique=True),
-                path=ID(stored=True),
-                title=TEXT(stored=True),
-                lang=ID(stored=True),
-                page=NUMERIC(stored=True),
-                section=TEXT(stored=True),
-                content=TEXT(stored=False, analyzer=NgramWordAnalyzer(3, 20))
-            )
-            if not exists_in(lang_dir):
-                self.indexes[lang] = create_in(lang_dir, schema)
-            else:
-                self.indexes[lang] = open_dir(lang_dir)
-        return self.indexes[lang]
-
-    def index_document(self, doc_id, text: str, metadata: dict, lang: str):
-        ix: FileIndex = self._get_or_create_index(lang)
-        writer = ix.writer()
-        writer.update_document(
-            doc_id=str(doc_id),
-            path=str(metadata.get("path")),
-            title=str(metadata.get("title", "")),
-            lang=str(lang),
-            page=metadata.get("page", 1),
-            section=str(metadata.get("section", "")),
-            content=str(text)
-        )
-        writer.commit()
-
-    def search(self, query, lang=None, limit=20):
-        langs = [lang] if lang else [d.name for d in self.index_root.iterdir() if d.is_dir()]
-        all_results = []
-        for lg in langs:
-            ix: FileIndex = self._get_or_create_index(lg)
-            qp = MultifieldParser(["content", "title", "section"], schema=ix.schema)
-            q = qp.parse(query)
-            with ix.searcher() as s:
-                res = s.search(q, limit=limit)
-                for r in res:
-                    data = dict(r)
-                    data["lang"] = lg
-                    all_results.append(data)
-                    data["score"] = r.score
-        return sorted(all_results, key=lambda x: -x.get("score", 0))
-    
-    def commit(self, lang=None):
-        pass  # handled per-write in Whoosh
-    
-    def clear_index(self, lang=None):
-        if lang:
-            for f in (self.index_root / lang).glob("*"):
-                f.unlink()
-        else:
-            for subdir in self.index_root.glob("*"):
-                for f in subdir.glob("*"):
-                    f.unlink()
 
 
 class TantivyBackend(BaseIndexer):

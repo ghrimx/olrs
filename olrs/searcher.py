@@ -1,3 +1,4 @@
+import re
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex, QVariant, pyqtSignal as Signal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
@@ -70,7 +71,7 @@ class SearchResultsModel(QAbstractTableModel):
 
 class SearchWidget(QWidget):
     sig_query = Signal()
-    sig_open_pdf = Signal(str, int, str)
+    sig_open_pdf = Signal(str, int, str, object)
 
     def __init__(self, db: DbManager, manager: BackendManager):
         super().__init__()
@@ -124,9 +125,9 @@ class SearchWidget(QWidget):
         lang = self.language_combo.currentText()
         mode = SearchMode.PARTIAL if self.partial_radio.isChecked() else SearchMode.WHOLE
 
-        results = self.manager.search(query, lang, mode)
+        results, matched_terms = self.manager.search(query, lang, mode)
 
-
+        self.matched_terms: set = matched_terms
         all_sources = self.db.all_sources()
 
         for r in results:
@@ -148,8 +149,10 @@ class SearchWidget(QWidget):
 
         # Apply highlights if query provided
         query = self.input.text().strip()
+        query_terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2]
+        self.matched_terms.add(t for t in query_terms)
 
-        self.sig_open_pdf.emit(path, pno, query)
+        self.sig_open_pdf.emit(path, pno, query, self.matched_terms)
 
 
 

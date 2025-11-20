@@ -77,17 +77,15 @@ class MainWindow(QMainWindow):
         self.stopSpinner(f"Finished indexing {pdf_path}")
         # self.progress_bar.setValue(0)
 
-    def open_pdf(self, pdf_path: str, pno: int, query: str):
+    def open_pdf(self, pdf_path: str, pno: int, query: str, matched_terms: set):
         pdf_viewer = PdfViewer()
         pdf_viewer.loadDocument(pdf_path)
 
         # Apply highlights if query provided
         if query:
-            terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2]
-
-            for term in terms:
+            for term in matched_terms:
                 for page in pdf_viewer.fitzdoc:
-                    quads = page.search_for(term, quads=True)
+                    quads = page.search_for(str(term), quads=True)
                     for q in quads:
                         highlight = page.add_highlight_annot(q)
                         highlight.set_colors(stroke=(1, 1, 0))  # yellow

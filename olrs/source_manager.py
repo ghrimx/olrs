@@ -113,7 +113,7 @@ class AddSourceDialog(QDialog):
 
         # Source path
         source = self.pdf_path
-        destination = DATA_DIR
+        destination = DATA_DIR.joinpath(source.name)
 
         try:
             shutil.copy2(source, destination)
@@ -145,7 +145,7 @@ class AddSourceDialog(QDialog):
             QMessageBox.critical(self, "Database error", str(e))
             return
         else:
-            self.sig_source_added.emit({"doc_id": self.new_id, "path": self.pdf_path.as_posix(), "lang": language})
+            self.sig_source_added.emit({"doc_id": self.new_id, "path": destination.as_posix(), "lang": language})
             super().accept()
 
         
