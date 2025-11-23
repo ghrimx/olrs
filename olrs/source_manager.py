@@ -7,8 +7,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLi
 from PyQt6.QtSql import QSqlTableModel
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal as Signal
-import fitz
+import pymupdf
 
+from pdf_reader import PDFIndexWorker
 
 from config import DATA_DIR, EULanguage
 from db_manager import DbManager
@@ -87,7 +88,7 @@ class AddSourceDialog(QDialog):
         self.file_edit.setText(str(self.pdf_path))
 
         try:
-            with fitz.open(self.pdf_path) as doc:
+            with pymupdf.open(self.pdf_path) as doc:
                 self.page_count = len(doc)
             self.page_label.setText(str(self.page_count))
         except Exception as e:
@@ -196,7 +197,7 @@ class SourceManager(QWidget):
         self.refresh_btn.clicked.connect(self.refresh)
         self.save_btn.clicked.connect(self.save_changes)
         self.delete_btn.clicked.connect(self.delete_selected)
-        # self.reindex_button.clicked.connect(self.reindex_selected)
+        self.reindex_button.clicked.connect(self.index_source)
 
     def add_source(self):
         dlg = AddSourceDialog(self.db, self)
@@ -245,6 +246,17 @@ class SourceManager(QWidget):
             self.db.db.exec("VACUUM")
             QMessageBox.information(self, "Deleted", "Sources deleted successfully.")
             self.model.select()
+
+    def index_source(self):
+        index = self.table.selectionModel().currentIndex()
+        if not index:
+            QMessageBox.warning(self, "No Selection", "Select at least one source to reindex.")
+            return
+        source_id = self.model.data(self.model.index(index.row(), 0))
+        filename = self.model.data(self.model.index(index.row(), 1))
+        language = self.model.data(self.model.index(index.row(), 7))
+        destination = DATA_DIR.joinpath(filename)
+        self.sig_source_added.emit({"doc_id": source_id, "path": destination.as_posix(), "lang": language})
 
     def closeEvent(self, event):
         super().closeEvent(event)

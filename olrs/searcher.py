@@ -9,7 +9,7 @@ from db_manager import DbManager
 from config import EULanguage
 from indexer import BackendManager
 from common import SearchMode
-
+from message_bus import bus
 
 class SearchResultsModel(QAbstractTableModel):
     def __init__(self, results=None, parent=None):
@@ -71,7 +71,7 @@ class SearchResultsModel(QAbstractTableModel):
 
 class SearchWidget(QWidget):
     sig_query = Signal()
-    sig_open_pdf = Signal(str, int, str, object)
+    sig_open_pdf = Signal(object)
 
     def __init__(self, db: DbManager, manager: BackendManager):
         super().__init__()
@@ -110,8 +110,9 @@ class SearchWidget(QWidget):
         self.model = SearchResultsModel()
         self.table = QTableView()
         self.table.setModel(self.model)
-        # for i in range(4, self.model.columnCount()):
-        #     self.table.hideColumn(i)
+        for i in [4, 6, 7]:
+            self.table.hideColumn(i)
+        # self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
 
         # --- Signals ---
@@ -137,10 +138,14 @@ class SearchWidget(QWidget):
                 r['short_title'] = all_sources.get(doc_id).get('short_title')
         self.model.update_results(results)
         self.table.resizeColumnsToContents()
+        bus.timedMessage.emit(f"[Results: {len(results)}]", 5000)
 
     def open_pdf(self, index: QModelIndex):
         path = self.model.data(self.model.index(index.row(), 6))
         page = self.model.data(self.model.index(index.row(), 2))
+        title = self.model.data(self.model.index(index.row(), 1)) 
+        if title.strip() == "":
+            title = self.model.data(self.model.index(index.row(), 0)) 
 
         try:
             pno = int(page) - 1
@@ -152,7 +157,8 @@ class SearchWidget(QWidget):
         query_terms = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2]
         self.matched_terms.add(t for t in query_terms)
 
-        self.sig_open_pdf.emit(path, pno, query, self.matched_terms)
+        doc = {"path":path, "title":title, "page": pno, "query":query, "terms":self.matched_terms}
+        self.sig_open_pdf.emit(doc)
 
 
 

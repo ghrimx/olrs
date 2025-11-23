@@ -2,6 +2,7 @@ from pathlib import Path
 import pymupdf.layout
 pymupdf.layout.activate()
 from pymupdf4llm import to_markdown
+import pymupdf
 from PyQt6.QtCore import QThread, pyqtSignal as Signal
 from indexer import BackendManager
 
@@ -54,6 +55,6 @@ class PDFIndexWorker(QThread):
                     self.progress.emit(pdf_path, page_number, total_pages)
             except Exception as e:
                 print(f"Error while indexing {pdf_path}: {e}")
-                self.error.emit(f"Error while indexing {pdf_path}: {e}")
+                self.error.emit(f"Error while indexing {pdf_path} pagge '{page_number}': {e}")
             finally:
                 self.finished.emit(pdf_path)

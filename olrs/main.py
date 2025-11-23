@@ -64,7 +64,7 @@ def main() -> int:
 
     # Initialize the main window
     mainwindow: MainWindow = MainWindow()
-    mainwindow.show()
+    mainwindow.showMaximized()
 
     splash.finish(mainwindow)
 

@@ -1,10 +1,10 @@
 import re
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QComboBox, QPushButton, QLineEdit, QRadioButton, QButtonGroup, QTableView
+    QComboBox, QPushButton, QLineEdit, QRadioButton, QButtonGroup, QTableView,
+    QStatusBar
     )
 from PyQt6.QtSql import QSqlQueryModel
-from PyQt6.QtCore import pyqtSignal as Signal
 
 from PyQt6Ads import CDockManager, CDockWidget, DockWidgetArea
 
@@ -21,6 +21,37 @@ from searcher import SearchWidget
 
 from pymupdf_qt_viewer.pymupdfviewer import PdfViewer
 
+from message_bus import bus
+
+import weakref
+from typing import Dict, Optional
+
+
+class DockRegistry:
+    def __init__(self):
+        # { "name": weakref to CDockWidget }
+        self._widgets: Dict[str, weakref.ReferenceType] = {}
+
+    def register(self, widget: CDockWidget):
+        name = widget.objectName()
+        self._widgets[name] = weakref.ref(widget)
+
+        # auto-unregister when closed
+        widget.closed.connect(lambda: self.unregister(name))
+
+    def unregister(self, name: str):
+        if name in self._widgets:
+            del self._widgets[name]
+
+    def exists(self, name: str) -> bool:
+        return name in self._widgets and self._widgets[name]() is not None
+
+    def get(self, name: str) -> Optional[CDockWidget]:
+        ref = self._widgets.get(name)
+        if ref is None:
+            return None
+        return ref()
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -32,9 +63,7 @@ class MainWindow(QMainWindow):
         CDockManager.setConfigFlag(CDockManager.eConfigFlag.FocusHighlighting, True)
         CDockManager.setAutoHideConfigFlags(CDockManager.eAutoHideFlag.DefaultAutoHideConfig)
         self.dock_manager = CDockManager(self)
-
-        # self.tabs = QTabWidget()
-        # self.setCentralWidget(self.tabs)
+        self.registry = DockRegistry()
 
         self.backend = WhooshBackend()
         self.manager = BackendManager(self.backend)
@@ -58,13 +87,19 @@ class MainWindow(QMainWindow):
         self.synonym_dock_widget.setWidget(self.synonym_tab)
         self.dock_manager.addDockWidgetTabToArea(self.synonym_dock_widget, self.central_area)
 
-        self.statusBar().showMessage("Ready.", 7000)
+        self.search_dock_widget.setAsCurrentTab()
+
+        self.statusbar = QStatusBar()
+        self.setStatusBar(self.statusbar)
+        self.statusbar.showMessage("Ready.", 7000)
         self.waitinspinner = WaitingSpinner(self, True, True)
         
         # --- Signals ---
         self.source_tab.sig_source_added.connect(self.add_pdf)
         self.source_tab.sig_source_removed.connect(self.remove_pdf)
         self.search_tab.sig_open_pdf.connect(self.open_pdf)
+        bus.timedMessage.connect(self.statusbar.showMessage)
+        bus.message.connect(self.statusbar.showMessage)
 
     def startSpinner(self, m: str = ""):
         self.statusBar().showMessage(m, 7000)
@@ -95,7 +130,29 @@ class MainWindow(QMainWindow):
         self.stopSpinner(f"Finished indexing {pdf_path}")
         # self.progress_bar.setValue(0)
 
-    def open_pdf(self, pdf_path: str, pno: int, query: str, matched_terms: set):
+    def open_tab(self, name: str, create_fn):
+
+        # If already exists then activate
+        if self.registry.exists(name):
+            existing = self.registry.get(name)
+            existing.setAsCurrentTab()
+            return existing
+
+        # Create a new widget
+        widget = create_fn()
+        widget.setObjectName(name)
+
+        self.dock_manager.addDockWidget(DockWidgetArea.CenterDockWidgetArea, widget, self.central_area)
+
+        self.registry.register(widget)
+        return widget
+    
+    def create_pdfviewer(self, doc: dict):
+        query = doc.get("query")
+        pdf_path = doc.get("path")
+        matched_terms = doc.get("terms")
+        pno = doc.get("page")
+        title = doc.get("title")
         pdf_viewer = PdfViewer()
         pdf_viewer.loadDocument(pdf_path)
 
@@ -110,4 +167,18 @@ class MainWindow(QMainWindow):
                         highlight.update()
 
         pdf_viewer.page_navigator.jump(pno)
-        pdf_viewer.showMaximized()
+        # pdf_viewer.showMaximized()
+
+        doc_dock_widget = CDockWidget(title[:15])
+        doc_dock_widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetDeleteOnClose, True)
+        doc_dock_widget.closed.connect(self.search_dock_widget.setAsCurrentTab) 
+        doc_dock_widget.setWidget(pdf_viewer)
+        return doc_dock_widget
+        # self.dock_manager.addDockWidgetTabToArea(doc_dock_widget, self.central_area)
+
+    def open_pdf(self, doc: dict):
+        pdf_path = doc.get("path")
+        dw: CDockWidget = self.open_tab(pdf_path, lambda: self.create_pdfviewer(doc))
+        dw.widget().page_navigator.jump(doc.get("page"))
+
+        
