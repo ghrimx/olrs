@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtSql import QSqlQueryModel
 from PyQt6.QtCore import pyqtSignal as Signal
 
+from PyQt6Ads import CDockManager, CDockWidget, DockWidgetArea
+
 from pyqtspinner import WaitingSpinner
 
 from db_manager import DbManager
@@ -21,12 +23,18 @@ from pymupdf_qt_viewer.pymupdfviewer import PdfViewer
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent = None):
-        super().__init__(parent)
+    def __init__(self):
+        super().__init__()
         self.db = DbManager.instance()
 
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        CDockManager.setConfigFlag(CDockManager.eConfigFlag.OpaqueSplitterResize, True)
+        CDockManager.setConfigFlag(CDockManager.eConfigFlag.XmlCompressionEnabled, False)
+        CDockManager.setConfigFlag(CDockManager.eConfigFlag.FocusHighlighting, True)
+        CDockManager.setAutoHideConfigFlags(CDockManager.eAutoHideFlag.DefaultAutoHideConfig)
+        self.dock_manager = CDockManager(self)
+
+        # self.tabs = QTabWidget()
+        # self.setCentralWidget(self.tabs)
 
         self.backend = WhooshBackend()
         self.manager = BackendManager(self.backend)
@@ -36,9 +44,19 @@ class MainWindow(QMainWindow):
         self.source_tab = SourceManager(self.db)
         self.synonym_tab = SynonymManager(SYNONYM_FILE)
 
-        self.tabs.addTab(self.search_tab, "Search")
-        self.tabs.addTab(self.source_tab , "Library")
-        self.tabs.addTab(self.synonym_tab , "Synonym")
+        self.search_dock_widget = CDockWidget("Search", self)
+        self.search_dock_widget.setWidget(self.search_tab)
+        self.search_dock_widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetClosable, False)
+        self.central_area = self.dock_manager.addDockWidget(DockWidgetArea.CenterDockWidgetArea, self.search_dock_widget)
+
+        self.source_doc_widget = CDockWidget("Library", self) 
+        self.source_doc_widget.setWidget(self.source_tab)
+        self.source_doc_widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetClosable, False)
+        self.dock_manager.addDockWidgetTabToArea(self.source_doc_widget, self.central_area)
+
+        self.synonym_dock_widget = CDockWidget("Synonym", self) 
+        self.synonym_dock_widget.setWidget(self.synonym_tab)
+        self.dock_manager.addDockWidgetTabToArea(self.synonym_dock_widget, self.central_area)
 
         self.statusBar().showMessage("Ready.", 7000)
         self.waitinspinner = WaitingSpinner(self, True, True)
