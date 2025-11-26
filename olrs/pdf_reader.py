@@ -1,6 +1,3 @@
-from pathlib import Path
-import pymupdf.layout
-pymupdf.layout.activate()
 from pymupdf4llm import to_markdown
 import pymupdf
 from PyQt6.QtCore import QThread, pyqtSignal as Signal
@@ -12,9 +9,9 @@ def extract_pdf_pages(doc: pymupdf.Document):
     """
     Generator: yields (page_number, text) tuples for each page.
     """
-    for page_number in range(doc.page_count):
-        text = to_markdown(doc, pages=page_number)
-        yield page_number + 1, text
+    for page in doc:
+        text = to_markdown(doc, pages=[page.number])
+        yield page.number + 1, text
 
 
 class PDFIndexWorker(QThread):

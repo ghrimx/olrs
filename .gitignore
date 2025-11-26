@@ -17,6 +17,7 @@ lib/
 lib64/
 parts/
 sdist/
+dist/
 var/
 wheels/
 share/python-wheels/
@@ -182,3 +183,6 @@ cython_debug/
 resources/
 indexdir/
 data/
+.innoSetup/
+*.db
+*.sqlite

@@ -23,9 +23,9 @@ def main() -> int:
     app: QApplication = QApplication(sys.argv)
     app.setOrganizationName("FAMHP")
     app.setOrganizationDomain("famhp.net")
-    app.setApplicationName("Olrs")
+    app.setApplicationName("olrf")
     app.setStyle("Fusion") 
-    app.setWindowIcon(QIcon(":mylogo"))
+    app.setWindowIcon(QIcon(":olrs_logo"))
 
     if theme_icon_manager.is_dark_mode(app):
         theme_icon_manager.set_theme(Theme.DARK)
@@ -33,15 +33,19 @@ def main() -> int:
         theme_icon_manager.set_theme(Theme.LIGHT)
 
     # Splashscreen
-    pixmap = QPixmap(":mylogo")
+    pixmap = QPixmap(":olrs_logo")
     splash = QSplashScreen(pixmap, Qt.WindowType.WindowStaysOnTopHint)
     splash.show()
-    splash.showMessage("Starting ...", Qt.AlignmentFlag.AlignBottom, Qt.GlobalColor.white)
+    splash.showMessage("Starting ...",
+                       Qt.AlignmentFlag.AlignBottom,
+                       Qt.GlobalColor.white)
 
     app.processEvents()
 
     # Post init configuration
-    splash.showMessage("Post Init Config ...", Qt.AlignmentFlag.AlignBottom, Qt.GlobalColor.white)
+    splash.showMessage("Post Init Config ...",
+                       Qt.AlignmentFlag.AlignBottom,
+                       Qt.GlobalColor.white)
 
     app.processEvents()
 
@@ -51,7 +55,7 @@ def main() -> int:
     # Set Taskbar Icon
     try:
         from ctypes import windll
-        appid = "fahmp.inspectormate.v1.0"
+        appid = "fahmp.olrf.v0.0.1"
         windll.shell32.SetCurrentProcessExplicitAppUserModelID(appid)
     except ImportError:
         logger.error(ImportError.msg)
@@ -59,7 +63,7 @@ def main() -> int:
 
     splash.showMessage("Connecting to the database ...")
 
-    logger.info(f"Starting InspectorMate...")
+    logger.info(f"Starting olrf...")
 
 
     # Initialize the main window
