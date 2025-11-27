@@ -186,3 +186,4 @@ data/
 .innoSetup/
 *.db
 *.sqlite
+database.db

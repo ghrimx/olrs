@@ -237,7 +237,10 @@ class SourceManager(QWidget):
             filename = self.model.data(self.model.index(index.row(), 1))
             filepath = DATA_DIR.joinpath(filename)
             import os
-            os.remove(filepath)
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                pass
             self.sig_source_removed.emit(filepath)
 
         if not self.model.submitAll():

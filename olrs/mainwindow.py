@@ -76,16 +76,16 @@ class MainWindow(QMainWindow):
         self.search_dock_widget = CDockWidget("Search", self)
         self.search_dock_widget.setWidget(self.search_tab)
         self.search_dock_widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetClosable, False)
-        self.central_area = self.dock_manager.addDockWidget(DockWidgetArea.CenterDockWidgetArea, self.search_dock_widget)
+        self.left_area = self.dock_manager.addDockWidget(DockWidgetArea.LeftDockWidgetArea, self.search_dock_widget)
 
         self.source_doc_widget = CDockWidget("Library", self) 
         self.source_doc_widget.setWidget(self.source_tab)
         self.source_doc_widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetClosable, False)
-        self.dock_manager.addDockWidgetTabToArea(self.source_doc_widget, self.central_area)
+        self.dock_manager.addDockWidgetTabToArea(self.source_doc_widget, self.left_area)
 
         self.synonym_dock_widget = CDockWidget("Synonym", self) 
         self.synonym_dock_widget.setWidget(self.synonym_tab)
-        self.dock_manager.addDockWidgetTabToArea(self.synonym_dock_widget, self.central_area)
+        self.dock_manager.addDockWidgetTabToArea(self.synonym_dock_widget, self.left_area)
 
         self.search_dock_widget.setAsCurrentTab()
 
@@ -142,7 +142,7 @@ class MainWindow(QMainWindow):
         widget = create_fn()
         widget.setObjectName(name)
 
-        self.dock_manager.addDockWidget(DockWidgetArea.CenterDockWidgetArea, widget, self.central_area)
+        self.dock_manager.addDockWidget(DockWidgetArea.RightDockWidgetArea, widget)
 
         self.registry.register(widget)
         return widget
