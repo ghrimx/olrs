@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLi
                              QProgressDialog, QComboBox)
 from PyQt6.QtSql import QSqlTableModel
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal as Signal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal as Signal, QModelIndex
 import pymupdf
 
 from pdf_reader import PDFIndexWorker
@@ -154,6 +154,7 @@ class AddSourceDialog(QDialog):
 class SourceManager(QWidget):
     sig_source_added = Signal(object)
     sig_source_removed = Signal(object)
+    sig_open_pdf = Signal(object, bool)
 
     def __init__(self, db: DbManager):
         super().__init__()
@@ -190,6 +191,7 @@ class SourceManager(QWidget):
         self.table.setModel(self.model)
         self.table.resizeColumnsToContents()
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.table)
 
         # --- Signals ---
@@ -198,6 +200,7 @@ class SourceManager(QWidget):
         self.save_btn.clicked.connect(self.save_changes)
         self.delete_btn.clicked.connect(self.delete_selected)
         self.reindex_button.clicked.connect(self.index_source)
+        self.table.doubleClicked.connect(lambda idx, ext=False: self.open_pdf(idx, ext))
 
     def add_source(self):
         dlg = AddSourceDialog(self.db, self)
@@ -260,6 +263,20 @@ class SourceManager(QWidget):
         language = self.model.data(self.model.index(index.row(), 7))
         destination = DATA_DIR.joinpath(filename)
         self.sig_source_added.emit({"doc_id": source_id, "path": destination.as_posix(), "lang": language})
+
+    def open_pdf(self, index: QModelIndex, ext=False):
+        path = self.model.data(self.model.index(index.row(), 1))
+        pno = 0
+        title = self.model.data(self.model.index(index.row(), 2)) 
+        if title.strip() == "":
+            title = self.model.data(self.model.index(index.row(), 3)) 
+
+        filepath = DATA_DIR.joinpath(path).as_posix()
+
+        doc = {"path":filepath, "title":title, "page": pno, "query":None, "terms":None}
+        self.sig_open_pdf.emit(doc, ext)
+
+        # QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(filepath.as_posix()))
 
     def closeEvent(self, event):
         super().closeEvent(event)

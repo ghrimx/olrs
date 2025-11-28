@@ -56,6 +56,7 @@ class DockRegistry:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowTitle("Open Legal Reference Finder")
         self.db = DbManager.instance()
 
         CDockManager.setConfigFlag(CDockManager.eConfigFlag.OpaqueSplitterResize, True)
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
         CDockManager.setAutoHideConfigFlags(CDockManager.eAutoHideFlag.DefaultAutoHideConfig)
         self.dock_manager = CDockManager(self)
         self.registry = DockRegistry()
+        self.central_area = None
 
         self.backend = WhooshBackend()
         self.manager = BackendManager(self.backend)
@@ -96,6 +98,7 @@ class MainWindow(QMainWindow):
         
         # --- Signals ---
         self.source_tab.sig_source_added.connect(self.add_pdf)
+        self.source_tab.sig_open_pdf.connect(self.open_pdf)
         self.source_tab.sig_source_removed.connect(self.remove_pdf)
         self.search_tab.sig_open_pdf.connect(self.open_pdf)
         bus.timedMessage.connect(self.statusbar.showMessage)
@@ -142,7 +145,10 @@ class MainWindow(QMainWindow):
         widget = create_fn()
         widget.setObjectName(name)
 
-        self.dock_manager.addDockWidget(DockWidgetArea.RightDockWidgetArea, widget)
+        if self.central_area:
+            self.dock_manager.addDockWidgetTabToArea(widget, self.central_area)
+        else:
+           self.central_area = self.dock_manager.addDockWidget(DockWidgetArea.RightDockWidgetArea, widget)
 
         self.registry.register(widget)
         return widget
@@ -176,9 +182,11 @@ class MainWindow(QMainWindow):
         return doc_dock_widget
         # self.dock_manager.addDockWidgetTabToArea(doc_dock_widget, self.central_area)
 
-    def open_pdf(self, doc: dict):
-        pdf_path = doc.get("path")
-        dw: CDockWidget = self.open_tab(pdf_path, lambda: self.create_pdfviewer(doc))
-        dw.widget().page_navigator.jump(doc.get("page"))
+    def open_pdf(self, doc: dict, ext = False):
+        if not ext:
+            pdf_path = doc.get("path")
+            dw: CDockWidget = self.open_tab(pdf_path, lambda: self.create_pdfviewer(doc))
+            dw.widget().page_navigator.jump(doc.get("page"))
 
-        
+        else:
+            print('open externaly')
