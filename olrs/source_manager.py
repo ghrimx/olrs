@@ -3,9 +3,9 @@ import logging
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit, QFileDialog,
                              QTableView, QLabel, QMessageBox, QFormLayout, QDialog, QDialogButtonBox,
-                             QProgressDialog, QComboBox)
+                             QProgressDialog, QComboBox, QMenu)
 from PyQt6.QtSql import QSqlTableModel
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QMouseEvent, QCursor, QAction
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal as Signal, QModelIndex
 import pymupdf
 
@@ -149,7 +149,41 @@ class AddSourceDialog(QDialog):
             self.sig_source_added.emit({"doc_id": self.new_id, "path": destination.as_posix(), "lang": language})
             super().accept()
 
-        
+
+class SourceTable(QTableView):
+    sig_open_pdf = Signal(object, bool)
+
+    def __init__(self, model, parent = None):
+        super().__init__(parent)
+        self.setModel(model)
+        self.resizeColumnsToContents()
+        self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.showContextMenu)
+        self.doubleClicked.connect(lambda: self.open_pdf(False))
+
+    def showContextMenu(self, event: QMouseEvent):
+        # model = self.model()
+        # index = self.selectionModel().currentIndex()
+        self.context_menu = QMenu(self)
+        self.context_menu.addAction(QAction('Open', self, triggered=lambda: self.open_pdf(False)))
+        self.context_menu.addAction(QAction('Open with...', self, triggered=lambda: self.open_pdf(True)))
+        self.context_menu.exec(QCursor().pos())
+
+    def open_pdf(self, ext):
+        index = self.selectionModel().currentIndex()
+        path = self.model().data(self.model().index(index.row(), 1))
+        pno = 0
+        title =  self.model().data(self.model().index(index.row(), 2))
+        if title.strip() == "":
+            title =  self.model().data(self.model().index(index.row(), 3))
+
+        filepath = DATA_DIR.joinpath(path).as_posix()
+
+        doc = {"path":filepath, "title":title, "page": pno, "query":None, "terms":None}
+        self.sig_open_pdf.emit(doc, ext)
+
 
 class SourceManager(QWidget):
     sig_source_added = Signal(object)
@@ -187,11 +221,11 @@ class SourceManager(QWidget):
         self.model.setEditStrategy(QSqlTableModel.EditStrategy.OnManualSubmit)
         self.model.select()
 
-        self.table = QTableView()
-        self.table.setModel(self.model)
-        self.table.resizeColumnsToContents()
-        self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.table = SourceTable(self.model)
+        # self.table.setModel()
+        # self.table.resizeColumnsToContents()
+        # self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        # self.table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.table)
 
         # --- Signals ---
@@ -200,7 +234,8 @@ class SourceManager(QWidget):
         self.save_btn.clicked.connect(self.save_changes)
         self.delete_btn.clicked.connect(self.delete_selected)
         self.reindex_button.clicked.connect(self.index_source)
-        self.table.doubleClicked.connect(lambda idx, ext=False: self.open_pdf(idx, ext))
+        # self.table.doubleClicked.connect(lambda idx, ext=False: self.open_pdf(idx, ext))
+        self.table.sig_open_pdf.connect(self.sig_open_pdf)
 
     def add_source(self):
         dlg = AddSourceDialog(self.db, self)

@@ -5,8 +5,9 @@ from PyQt6.QtWidgets import (
     QStatusBar
     )
 from PyQt6.QtSql import QSqlQueryModel
-
-from PyQt6Ads import CDockManager, CDockWidget, DockWidgetArea
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QUrl
+from PyQt6Ads import CDockManager, CDockWidget, DockWidgetArea, CDockAreaWidget
 
 from pyqtspinner import WaitingSpinner
 
@@ -97,12 +98,23 @@ class MainWindow(QMainWindow):
         self.waitinspinner = WaitingSpinner(self, True, True)
         
         # --- Signals ---
+        self.dock_manager.dockWidgetRemoved.connect(self._on_widget_closed)
         self.source_tab.sig_source_added.connect(self.add_pdf)
         self.source_tab.sig_open_pdf.connect(self.open_pdf)
         self.source_tab.sig_source_removed.connect(self.remove_pdf)
         self.search_tab.sig_open_pdf.connect(self.open_pdf)
         bus.timedMessage.connect(self.statusbar.showMessage)
         bus.message.connect(self.statusbar.showMessage)
+
+    def _on_widget_closed(self, widget):
+        """ 
+        Fix dangling reference of central area
+        
+        When the last dock widget in an area is closed, the area is deleted.
+        Here we reset the reference before the area is destroyed.
+        """
+        if self.central_area and self.central_area.dockWidgetsCount() == 0:
+            self.central_area = None
 
     def startSpinner(self, m: str = ""):
         self.statusBar().showMessage(m, 7000)
@@ -133,17 +145,24 @@ class MainWindow(QMainWindow):
         self.stopSpinner(f"Finished indexing {pdf_path}")
         # self.progress_bar.setValue(0)
 
-    def open_tab(self, name: str, create_fn):
+    def open_tab(self, doc: dict):
+        pdf_path = doc.get("path")
+        title = doc.get("title")
 
         # If already exists then activate
-        if self.registry.exists(name):
-            existing = self.registry.get(name)
+        if self.registry.exists(pdf_path):
+            existing = self.registry.get(pdf_path)
             existing.setAsCurrentTab()
             return existing
-
+        
         # Create a new widget
-        widget = create_fn()
-        widget.setObjectName(name)
+        pdf_viewer = PdfViewer()
+        pdf_viewer.loadDocument(pdf_path)
+        widget = CDockWidget(title[:15])
+        widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetDeleteOnClose, True)
+        widget.setWidget(pdf_viewer)
+        widget.setObjectName(pdf_path)
+        widget.closed.connect(self.search_dock_widget.setAsCurrentTab) 
 
         if self.central_area:
             self.dock_manager.addDockWidgetTabToArea(widget, self.central_area)
@@ -153,40 +172,33 @@ class MainWindow(QMainWindow):
         self.registry.register(widget)
         return widget
     
-    def create_pdfviewer(self, doc: dict):
+    def highlight_terms(self, pdf_viewer: PdfViewer, doc: dict):
+        # Apply highlights if query provided
         query = doc.get("query")
-        pdf_path = doc.get("path")
         matched_terms = doc.get("terms")
         pno = doc.get("page")
-        title = doc.get("title")
-        pdf_viewer = PdfViewer()
-        pdf_viewer.loadDocument(pdf_path)
-
-        # Apply highlights if query provided
+        print(f"highlight page '{pno}': {query}")
         if query:
+            page = pdf_viewer.fitzdoc[pno]
+            for annot in page.annots():
+                if annot.type[0] == 8: 
+                    page.delete_annot(annot)
             for term in matched_terms:
-                for page in pdf_viewer.fitzdoc:
-                    quads = page.search_for(str(term), quads=True)
-                    for q in quads:
-                        highlight = page.add_highlight_annot(q)
-                        highlight.set_colors(stroke=(1, 1, 0))  # yellow
-                        highlight.update()
+                # pdf_viewer.fitzdoc.xref_set_key(page.xref, "Annots", "null") 
+                                        
+                quads = page.search_for(str(term), quads=True)
+                for q in quads:
+                    highlight = page.add_highlight_annot(q)
+                    highlight.set_colors(stroke=(1, 1, 0))  # yellow
+                    highlight.update()
 
-        pdf_viewer.page_navigator.jump(pno)
-        # pdf_viewer.showMaximized()
+            pdf_viewer.page_navigator.jump(pno)
 
-        doc_dock_widget = CDockWidget(title[:15])
-        doc_dock_widget.setFeature(CDockWidget.DockWidgetFeature.DockWidgetDeleteOnClose, True)
-        doc_dock_widget.closed.connect(self.search_dock_widget.setAsCurrentTab) 
-        doc_dock_widget.setWidget(pdf_viewer)
-        return doc_dock_widget
-        # self.dock_manager.addDockWidgetTabToArea(doc_dock_widget, self.central_area)
-
-    def open_pdf(self, doc: dict, ext = False):
-        if not ext:
+    def open_pdf(self, doc: dict, ext):
+        if ext:
             pdf_path = doc.get("path")
-            dw: CDockWidget = self.open_tab(pdf_path, lambda: self.create_pdfviewer(doc))
-            dw.widget().page_navigator.jump(doc.get("page"))
-
+            if pdf_path:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))
         else:
-            print('open externaly')
+            dw: CDockWidget = self.open_tab(doc)
+            self.highlight_terms(dw.widget(), doc)

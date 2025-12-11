@@ -17,12 +17,12 @@ class SearchResultsModel(QAbstractTableModel):
         self._results = results or []
 
         self._columns = [
-            ("Title", "title"),
-            ("Short Title", "short_title"),
-            ("Page", "page"),
-            ("Section", "section"),
-            ("Language", "lang"),
             ("Score", "score"),
+            ("Short Title", "short_title"),
+            ("Section", "section"),
+            ("Page", "page"),
+            ("Title", "title"),
+            ("Language", "lang"),
             ("Path", "path"),
             ("Doc ID", "doc_id"),
         ]
@@ -44,6 +44,8 @@ class SearchResultsModel(QAbstractTableModel):
         value = self._results[row].get(field_name)
 
         if role == Qt.ItemDataRole.DisplayRole:
+            if self._columns[col][1] == 'score':
+                return round(value, 2)
             return str(value)
         return QVariant()
 
@@ -71,7 +73,7 @@ class SearchResultsModel(QAbstractTableModel):
 
 class SearchWidget(QWidget):
     sig_query = Signal()
-    sig_open_pdf = Signal(object)
+    sig_open_pdf = Signal(object, bool)
 
     def __init__(self, db: DbManager, manager: BackendManager):
         super().__init__()
@@ -110,9 +112,9 @@ class SearchWidget(QWidget):
         self.model = SearchResultsModel()
         self.table = QTableView()
         self.table.setModel(self.model)
-        for i in [4, 6, 7]:
+        for i in [5, 6, 7]:
             self.table.hideColumn(i)
-        # self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
 
         # --- Signals ---
@@ -140,10 +142,10 @@ class SearchWidget(QWidget):
         self.table.resizeColumnsToContents()
         bus.timedMessage.emit(f"[Results: {len(results)}]", 5000)
 
-    def open_pdf(self, index: QModelIndex):
+    def open_pdf(self, index: QModelIndex, ext: bool = False):
         path = self.model.data(self.model.index(index.row(), 6))
-        page = self.model.data(self.model.index(index.row(), 2))
-        title = self.model.data(self.model.index(index.row(), 1)) 
+        page = self.model.data(self.model.index(index.row(), 3))
+        title = self.model.data(self.model.index(index.row(), 4)) 
         if title.strip() == "":
             title = self.model.data(self.model.index(index.row(), 0)) 
 
@@ -158,7 +160,7 @@ class SearchWidget(QWidget):
         self.matched_terms.add(t for t in query_terms)
 
         doc = {"path":path, "title":title, "page": pno, "query":query, "terms":self.matched_terms}
-        self.sig_open_pdf.emit(doc)
+        self.sig_open_pdf.emit(doc, ext)
 
 
 
